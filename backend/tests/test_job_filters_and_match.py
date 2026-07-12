@@ -74,6 +74,36 @@ class JobFiltersAndMatchTests(TestCase):
                     details_status="complete",
                     posted_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1),
                 ),
+                Job(
+                    source="workday",
+                    external_id="architect-1",
+                    title="Technical Architect (Cloud & Platform Engineering)",
+                    company="Bosch",
+                    location="Hyderabad, India",
+                    description=(
+                        "Architect cloud platform engineering roadmaps, technical governance, stakeholder alignment, "
+                        "and distributed enterprise systems for senior platform teams."
+                    ),
+                    remote=False,
+                    seniority_level="Senior level",
+                    details_status="complete",
+                    posted_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1),
+                ),
+                Job(
+                    source="greenhouse",
+                    external_id="manager-1",
+                    title="Engineering Manager, Agent Runtime Platform",
+                    company="Anthropic",
+                    location="San Francisco, CA",
+                    description=(
+                        "Manage engineering teams building agent runtime platforms. Requires leadership, strategy, "
+                        "execution ownership, and 8+ years of software engineering experience."
+                    ),
+                    remote=False,
+                    seniority_level="Manager",
+                    details_status="complete",
+                    posted_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1),
+                ),
             ]
         )
         self.user = User(email="raj@example.com", full_name="Raj", hashed_password="hashed")
@@ -88,8 +118,8 @@ class JobFiltersAndMatchTests(TestCase):
     def test_filter_options_include_counts_and_jd_coverage(self) -> None:
         filters = list_job_filter_options(self.db)
 
-        self.assertEqual(4, filters["total_jobs"])
-        self.assertEqual(3, filters["jobs_with_jd"])
+        self.assertEqual(6, filters["total_jobs"])
+        self.assertEqual(5, filters["jobs_with_jd"])
         self.assertEqual(1, filters["jobs_without_jd"])
         self.assertIn({"value": "linkedin", "count": 3}, filters["sources"])
         self.assertIn({"value": "true", "count": 2}, filters["remote"])
@@ -115,6 +145,36 @@ class JobFiltersAndMatchTests(TestCase):
 
         self.assertGreaterEqual(response.total_candidates, 1)
         self.assertEqual("Backend Engineer", response.items[0].job.title)
+        self.assertGreater(response.items[0].score, 50)
+        self.assertIn("python", response.items[0].matched_keywords)
+
+    def test_resume_only_match_infers_role_and_experience(self) -> None:
+        response = match_jobs_for_resume(
+            self.db,
+            ResumeJobMatchRequest(
+                resume_text=(
+                    "Associate Full Stack Developer at Techolution July 2024 - Present. "
+                    "Built Email-to-Jira automation agents, a VS Code extension, repository analyser UI, "
+                    "and deployment automation. Skills: Python, JavaScript, TypeScript, React.js, Angular, "
+                    "FastAPI, Node.js, Express.js, REST APIs, WebSockets, MongoDB, SQL Server, GCP Cloud Build, "
+                    "AWS basics, Docker, OpenAI API, LLM integration, agentic workflows."
+                ),
+                limit=10,
+                require_jd=True,
+            ),
+        )
+
+        titles = [item.job.title for item in response.items]
+        self.assertIn("full stack developer", response.inferred_target_roles)
+        self.assertEqual(2, response.inferred_years_experience)
+        self.assertEqual("Backend Engineer", response.items[0].job.title)
+        backend = next(item for item in response.items if item.job.title == "Backend Engineer")
+        if "Technical Architect (Cloud & Platform Engineering)" in titles:
+            architect = next(item for item in response.items if item.job.title.startswith("Technical Architect"))
+            self.assertLess(architect.score, backend.score)
+        if "Engineering Manager, Agent Runtime Platform" in titles:
+            manager = next(item for item in response.items if item.job.title.startswith("Engineering Manager"))
+            self.assertLess(manager.score, backend.score)
         self.assertGreater(response.items[0].score, 50)
         self.assertIn("python", response.items[0].matched_keywords)
 

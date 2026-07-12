@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import json
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -57,6 +58,16 @@ STOPWORDS = {
     "projects",
     "developer",
     "engineer",
+    "engineering",
+    "platform",
+    "deployment",
+    "integrated",
+    "integrating",
+    "application",
+    "applications",
+    "investment",
+    "safety",
+    "time",
 }
 
 IMPORTANT_TECH = {
@@ -96,13 +107,71 @@ IMPORTANT_TECH = {
     "api",
 }
 
+TITLE_SIGNAL_STOPWORDS = STOPWORDS | {
+    "api",
+    "cloud",
+    "data",
+    "development",
+    "devops",
+    "llm",
+    "agent",
+    "automation",
+    "code",
+}
+
+NON_ENGINEERING_TITLE_TERMS = (
+    "account executive",
+    "customer success",
+    "sales",
+    "auditor",
+    "mechanical",
+    "data center",
+    "capital markets",
+    "investment banking",
+)
+
+SENIOR_TITLE_TERMS = ("director", "head of", "manager", "principal", "staff", "architect", "lead", "senior")
+
+MONTHS = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+
+
+@dataclass(frozen=True)
+class MatchProfile:
+    target_roles: list[str]
+    years_experience: int | None
+
 
 def match_jobs_for_resume(db: Session, payload: ResumeJobMatchRequest, user: User | None = None) -> ResumeJobMatchResponse:
-    resume_keywords = _resume_keywords(payload)
-    target_terms = [payload.job_title] if payload.job_title else []
-    query_terms = list(dict.fromkeys([*target_terms, *payload.target_roles, *payload.skills, *resume_keywords[:12]]))
-    candidates, filter_trace, relaxed = _find_candidates(db, payload, query_terms)
-    scored = [_score_job(job, payload, resume_keywords) for job in candidates]
+    profile = _match_profile(payload)
+    resume_keywords = _resume_keywords(payload, profile)
+    query_terms = _query_terms(payload, profile, resume_keywords)
+    candidates, filter_trace, relaxed = _find_candidates(db, payload, query_terms, profile)
+    scored = [_score_job(job, payload, profile, resume_keywords) for job in candidates]
     scored.sort(key=lambda item: item.score, reverse=True)
     llm_used = False
     llm_status = None
@@ -112,6 +181,8 @@ def match_jobs_for_resume(db: Session, payload: ResumeJobMatchRequest, user: Use
         total_candidates=len(candidates),
         returned=min(payload.limit, len(scored)),
         resume_keywords=resume_keywords[:30],
+        inferred_target_roles=profile.target_roles,
+        inferred_years_experience=profile.years_experience,
         relaxed=relaxed,
         filter_trace=filter_trace,
         llm_used=llm_used,
@@ -124,11 +195,13 @@ def _find_candidates(
     db: Session,
     payload: ResumeJobMatchRequest,
     query_terms: list[str],
+    profile: MatchProfile,
 ) -> tuple[list[Job], list[str], bool]:
+    effective_job_title = payload.job_title or (profile.target_roles[0] if profile.target_roles else None)
     attempts = [
         {
             "label": "strict preferences",
-            "job_title": payload.job_title,
+            "job_title": effective_job_title,
             "locations": payload.preferred_locations,
             "remote": payload.remote,
             "posted_since": _posted_since(payload),
@@ -136,7 +209,7 @@ def _find_candidates(
         },
         {
             "label": "relaxed remote preference",
-            "job_title": payload.job_title,
+            "job_title": effective_job_title,
             "locations": payload.preferred_locations,
             "remote": None,
             "posted_since": _posted_since(payload),
@@ -144,7 +217,7 @@ def _find_candidates(
         },
         {
             "label": "relaxed recency window",
-            "job_title": payload.job_title,
+            "job_title": effective_job_title,
             "locations": payload.preferred_locations,
             "remote": None,
             "posted_since": None,
@@ -195,8 +268,47 @@ def _find_candidates(
     return [], trace, False
 
 
-def _resume_keywords(payload: ResumeJobMatchRequest) -> list[str]:
-    explicit = [_normalize_keyword(skill) for skill in [payload.job_title or "", *payload.skills, *payload.target_roles]]
+def _match_profile(payload: ResumeJobMatchRequest) -> MatchProfile:
+    explicit_roles = [_normalize_keyword(role) for role in [payload.job_title or "", *payload.target_roles] if role]
+    inferred_roles = explicit_roles or _infer_target_roles(payload.resume_text)
+    return MatchProfile(
+        target_roles=list(dict.fromkeys(inferred_roles)),
+        years_experience=payload.years_experience if payload.years_experience is not None else _extract_years(payload.resume_text),
+    )
+
+
+def _infer_target_roles(resume_text: str) -> list[str]:
+    text = _text(resume_text).replace("-", " ")
+    roles: list[str] = []
+    if "full stack" in text or "fullstack" in text:
+        roles.extend(["full stack developer", "backend engineer", "software engineer", "frontend engineer"])
+    elif "backend" in text or "fastapi" in text or "node.js" in text or "express.js" in text:
+        roles.extend(["backend engineer", "software engineer"])
+    elif "frontend" in text or "react" in text or "angular" in text:
+        roles.extend(["frontend engineer", "software engineer"])
+    elif "software" in text or "developer" in text or "engineer" in text:
+        roles.append("software engineer")
+
+    if "ai agent" in text or "agentic" in text or "llm" in text or "openai" in text:
+        roles.append("ai engineer")
+
+    return list(dict.fromkeys(roles or ["software engineer", "backend engineer"]))
+
+
+def _query_terms(payload: ResumeJobMatchRequest, profile: MatchProfile, resume_keywords: list[str]) -> list[str]:
+    role_words: list[str] = []
+    for role in profile.target_roles:
+        role_words.extend(word for word in role.split() if word not in STOPWORDS and len(word) > 2)
+    high_signal_keywords = [
+        keyword
+        for keyword in resume_keywords
+        if keyword in IMPORTANT_TECH and keyword not in TITLE_SIGNAL_STOPWORDS
+    ]
+    return list(dict.fromkeys([*profile.target_roles, *role_words, *payload.skills, *high_signal_keywords[:12]]))
+
+
+def _resume_keywords(payload: ResumeJobMatchRequest, profile: MatchProfile) -> list[str]:
+    explicit = [_normalize_keyword(skill) for skill in [*profile.target_roles, *payload.skills]]
     explicit = [skill for skill in explicit if skill]
     words = [
         word
@@ -216,20 +328,29 @@ def _resume_keywords(payload: ResumeJobMatchRequest) -> list[str]:
     return list(dict.fromkeys([*explicit, *weighted]))
 
 
-def _score_job(job: Job, payload: ResumeJobMatchRequest, resume_keywords: list[str]) -> ResumeJobMatchItem:
+def _score_job(
+    job: Job,
+    payload: ResumeJobMatchRequest,
+    profile: MatchProfile,
+    resume_keywords: list[str],
+) -> ResumeJobMatchItem:
     title_text = _text(job.title)
     jd_text = _text(job.description)
     combined_text = f"{title_text} {jd_text} {_text(job.company)} {_text(job.location)}"
     important_keywords = resume_keywords[:40]
 
-    title_matches = [keyword for keyword in important_keywords if keyword in title_text]
+    title_matches = [
+        keyword
+        for keyword in important_keywords
+        if keyword not in TITLE_SIGNAL_STOPWORDS and keyword in title_text
+    ]
     jd_matches = [keyword for keyword in important_keywords if keyword in jd_text]
     matched = list(dict.fromkeys([*title_matches, *jd_matches]))
     missing = [keyword for keyword in important_keywords[:15] if keyword not in combined_text]
 
     score = 0.0
     reasons: list[str] = []
-    role_score, role_reasons = _role_score(job, payload)
+    role_score, role_reasons = _role_score(job, profile)
     score += role_score
     reasons.extend(role_reasons)
     if title_matches:
@@ -250,10 +371,14 @@ def _score_job(job: Job, payload: ResumeJobMatchRequest, resume_keywords: list[s
         score += 5
         reasons.append(f"Posted within last {payload.posted_within_days} days.")
 
-    experience_signal, experience_score = _experience_signal(job, payload)
+    experience_signal, experience_score = _experience_signal(job, profile)
     score += experience_score
     if experience_signal != "unknown":
         reasons.append(f"Experience signal: {experience_signal}.")
+
+    red_flag_score, red_flag_reasons = _red_flag_score(job, profile)
+    score += red_flag_score
+    reasons.extend(red_flag_reasons)
 
     if not job.description:
         score -= 10
@@ -272,8 +397,8 @@ def _score_job(job: Job, payload: ResumeJobMatchRequest, resume_keywords: list[s
     )
 
 
-def _experience_signal(job: Job, payload: ResumeJobMatchRequest) -> tuple[str, float]:
-    years = payload.years_experience if payload.years_experience is not None else _extract_years(payload.resume_text)
+def _experience_signal(job: Job, profile: MatchProfile) -> tuple[str, float]:
+    years = profile.years_experience
     if years is None:
         return "unknown", 0.0
 
@@ -303,10 +428,36 @@ def _experience_signal(job: Job, payload: ResumeJobMatchRequest) -> tuple[str, f
 
 
 def _extract_years(text: str) -> int | None:
-    matches = re.findall(r"(\d{1,2})\+?\s*(?:years|yrs)", text.lower())
-    if not matches:
-        return None
-    return max(int(match) for match in matches)
+    normalized = text.lower()
+    explicit_matches = re.findall(r"(\d{1,2})\+?\s*(?:years|yrs)", normalized)
+    found = [int(match) for match in explicit_matches]
+
+    month_names = "|".join(MONTHS)
+    range_pattern = re.compile(
+        rf"(?:(?P<start_month>{month_names})\.?\s+)?(?P<start_year>20\d{{2}}|19\d{{2}})\s*[-–]\s*"
+        rf"(?:(?P<end_month>{month_names})\.?\s+)?(?P<end_year>20\d{{2}}|19\d{{2}}|present|current|now)"
+    )
+    now = datetime.now(UTC)
+    for match in range_pattern.finditer(normalized):
+        before = normalized[max(0, match.start() - 120) : match.start()]
+        end_year_text = match.group("end_year")
+        if end_year_text not in {"present", "current", "now"} and any(
+            token in before for token in ("education", "bachelor", "intermediate", "college", "university")
+        ):
+            continue
+        start_year = int(match.group("start_year"))
+        start_month = MONTHS.get(match.group("start_month") or "", 1)
+        if end_year_text in {"present", "current", "now"}:
+            end_year = now.year
+            end_month = now.month
+        else:
+            end_year = int(end_year_text)
+            end_month = MONTHS.get(match.group("end_month") or "", 12)
+        months = (end_year - start_year) * 12 + (end_month - start_month)
+        if months >= 6:
+            found.append(max(1, round(months / 12)))
+
+    return max(found) if found else None
 
 
 def _required_years(text: str) -> int | None:
@@ -323,10 +474,9 @@ def _required_years(text: str) -> int | None:
     return max(found) if found else None
 
 
-def _role_score(job: Job, payload: ResumeJobMatchRequest) -> tuple[float, list[str]]:
+def _role_score(job: Job, profile: MatchProfile) -> tuple[float, list[str]]:
     title = _text(job.title).replace("-", " ")
-    target_terms = [payload.job_title or "", *payload.target_roles]
-    normalized_targets = [_normalize_keyword(term).replace("-", " ") for term in target_terms if term]
+    normalized_targets = [_normalize_keyword(term).replace("-", " ") for term in profile.target_roles if term]
     if not normalized_targets:
         return 0.0, []
 
@@ -344,6 +494,30 @@ def _role_score(job: Job, payload: ResumeJobMatchRequest) -> tuple[float, list[s
             reasons.append(f"Role partially matches '{target}'.")
             return score, reasons
     return -8.0, ["Role title is not a close match to preferences."]
+
+
+def _red_flag_score(job: Job, profile: MatchProfile) -> tuple[float, list[str]]:
+    title = _text(job.title).replace("-", " ")
+    text = f"{title} {_text(job.seniority_level)}"
+    reasons: list[str] = []
+    score = 0.0
+
+    if any(term in title for term in NON_ENGINEERING_TITLE_TERMS):
+        score -= 35.0
+        reasons.append("Red flag: role family looks outside software/full-stack/backend engineering.")
+
+    if profile.years_experience is not None and profile.years_experience < 5:
+        senior_terms = [term for term in SENIOR_TITLE_TERMS if term in text]
+        if senior_terms:
+            score -= 20.0
+            reasons.append(f"Red flag: seniority marker '{senior_terms[0]}' is high for this profile.")
+
+    role_text = " ".join(profile.target_roles)
+    if ("backend" in role_text or "full stack" in role_text or "software" in role_text) and "devops" in title:
+        score -= 12.0
+        reasons.append("Red flag: DevOps/platform focus is weaker than target role.")
+
+    return score, reasons
 
 
 def _posted_since(payload: ResumeJobMatchRequest) -> datetime | None:

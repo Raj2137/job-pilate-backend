@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24
     google_client_id: str | None = None
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:3000,http://localhost:3000"
+    cors_origin_regex: str | None = None
     web_search_provider: str = "auto"
     firecrawl_api_key: str | None = None
     brave_search_api_key: str | None = None
