@@ -350,6 +350,8 @@ class ResumeJobMatchResponse(BaseModel):
     total_candidates: int
     returned: int
     resume_keywords: list[str]
+    inferred_target_roles: list[str] = Field(default_factory=list)
+    inferred_years_experience: int | None = None
     relaxed: bool = False
     filter_trace: list[str] = Field(default_factory=list)
     llm_used: bool = False
