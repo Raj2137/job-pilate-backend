@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 from app.core.security import create_access_token, hash_password, verify_password
 from app.database.session import get_db
 from app.repositories.user_repository import create_user, get_user_by_email
-from app.schemas.auth import Token, UserCreate, UserLogin
+from app.schemas.auth import AuthSession, GoogleLogin, Token, UserCreate, UserLogin
 from app.schemas.user import UserRead
+from app.services.google_auth_service import sign_in_with_google
 
 router = APIRouter()
 
@@ -32,3 +33,8 @@ def signin(payload: UserLogin, db: Session = Depends(get_db)) -> Token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
 
     return Token(access_token=create_access_token(user.email))
+
+
+@router.post("/google", response_model=AuthSession)
+def google_signin(payload: GoogleLogin, db: Session = Depends(get_db)) -> AuthSession:
+    return sign_in_with_google(db, payload.token)
