@@ -200,6 +200,32 @@ class JobFiltersAndMatchTests(TestCase):
         self.assertLess(senior.score, backend.score)
         self.assertIn("too senior", senior.experience_signal)
 
+    def test_resume_match_supports_ranked_pagination(self) -> None:
+        base_payload = {
+            "resume_text": "Software engineer with Python, JavaScript, React, FastAPI, APIs, and cloud experience.",
+            "target_roles": ["software engineer", "backend engineer", "frontend engineer"],
+            "skills": ["Python", "JavaScript", "React", "FastAPI"],
+            "years_experience": 3,
+            "candidate_limit": 20,
+            "limit": 2,
+        }
+
+        first_page = match_jobs_for_resume(self.db, ResumeJobMatchRequest(**base_payload, page=1))
+        second_page = match_jobs_for_resume(self.db, ResumeJobMatchRequest(**base_payload, page=2))
+
+        self.assertEqual(1, first_page.page)
+        self.assertEqual(2, first_page.limit)
+        self.assertEqual(20, first_page.candidate_limit)
+        self.assertEqual(2, first_page.returned)
+        self.assertGreaterEqual(first_page.total_pages, 2)
+        self.assertTrue(first_page.has_next_page)
+        self.assertFalse(first_page.has_previous_page)
+        self.assertEqual(2, second_page.page)
+        self.assertTrue(second_page.has_previous_page)
+        first_ids = {item.job.id for item in first_page.items}
+        second_ids = {item.job.id for item in second_page.items}
+        self.assertTrue(first_ids.isdisjoint(second_ids))
+
     def test_resume_match_relaxes_filters_when_strict_preferences_find_nothing(self) -> None:
         response = match_jobs_for_resume(
             self.db,
