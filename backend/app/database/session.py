@@ -24,7 +24,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def create_db_and_tables() -> None:
-    from app.models import application, company, job, llm_key, search_segment, user  # noqa: F401
+    from app.models import application, company, job, llm_key, resume, search_segment, user  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _add_missing_user_columns()

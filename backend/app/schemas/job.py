@@ -331,6 +331,7 @@ class ResumeJobMatchRequest(BaseModel):
     latest_first: bool = True
     require_jd: bool = True
     candidate_limit: int = Field(default=500, ge=20, le=2000)
+    page: int = Field(default=1, ge=1)
     limit: int = Field(default=25, ge=1, le=100)
     use_llm: bool = False
     llm_key_id: int | None = None
@@ -349,6 +350,12 @@ class ResumeJobMatchItem(BaseModel):
 class ResumeJobMatchResponse(BaseModel):
     total_candidates: int
     returned: int
+    page: int = 1
+    limit: int
+    total_pages: int
+    has_next_page: bool = False
+    has_previous_page: bool = False
+    candidate_limit: int
     resume_keywords: list[str]
     inferred_target_roles: list[str] = Field(default_factory=list)
     inferred_years_experience: int | None = None

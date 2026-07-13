@@ -177,9 +177,20 @@ def match_jobs_for_resume(db: Session, payload: ResumeJobMatchRequest, user: Use
     llm_status = None
     if payload.use_llm:
         scored, llm_used, llm_status = _maybe_llm_rerank(db, payload, user, scored)
+    total_candidates = len(scored)
+    total_pages = (total_candidates + payload.limit - 1) // payload.limit if total_candidates else 0
+    start = (payload.page - 1) * payload.limit
+    end = start + payload.limit
+    page_items = scored[start:end]
     return ResumeJobMatchResponse(
-        total_candidates=len(candidates),
-        returned=min(payload.limit, len(scored)),
+        total_candidates=total_candidates,
+        returned=len(page_items),
+        page=payload.page,
+        limit=payload.limit,
+        total_pages=total_pages,
+        has_next_page=payload.page < total_pages,
+        has_previous_page=payload.page > 1 and total_pages > 0,
+        candidate_limit=payload.candidate_limit,
         resume_keywords=resume_keywords[:30],
         inferred_target_roles=profile.target_roles,
         inferred_years_experience=profile.years_experience,
@@ -187,7 +198,7 @@ def match_jobs_for_resume(db: Session, payload: ResumeJobMatchRequest, user: Use
         filter_trace=filter_trace,
         llm_used=llm_used,
         llm_status=llm_status,
-        items=scored[: payload.limit],
+        items=page_items,
     )
 
 
