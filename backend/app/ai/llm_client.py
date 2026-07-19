@@ -25,6 +25,7 @@ class LlmCompletionRequest:
     user_prompt: str
     max_tokens: int = 1200
     temperature: float = 0.2
+    thinking_level: str | None = None
 
 
 def complete_text(payload: LlmCompletionRequest) -> str:
@@ -55,8 +56,9 @@ def test_llm_key(*, provider: LlmProvider, api_key: str, model: str) -> str:
             model=model,
             system_prompt="You are a concise health-check responder.",
             user_prompt="Reply with exactly: ok",
-            max_tokens=8,
+            max_tokens=256 if provider == LlmProvider.GEMINI else 8,
             temperature=0,
+            thinking_level="minimal" if provider == LlmProvider.GEMINI else None,
         )
     )
 
@@ -76,7 +78,12 @@ def _complete_openai_compatible(payload: LlmCompletionRequest) -> str:
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
     }
-    headers = {"Authorization": f"Bearer {payload.api_key}", "Content-Type": "application/json", "Accept": "application/json",  "User-Agent": "JobPilot/1.0",}
+    headers = {
+        "Authorization": f"Bearer {payload.api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "JobPilot/1.0",
+    }
     if payload.provider == LlmProvider.OPENROUTER:
         headers.update({"HTTP-Referer": "https://jobpilot.local", "X-Title": "JobPilot"})
     body = _post_json(f"{base_url}/chat/completions", data, headers)
@@ -110,17 +117,91 @@ def _complete_anthropic(payload: LlmCompletionRequest) -> str:
 
 
 def _complete_gemini(payload: LlmCompletionRequest) -> str:
+    generation_config: dict[str, Any] = {"maxOutputTokens": payload.max_tokens}
+    if payload.model.casefold().startswith("gemini-3"):
+        if payload.thinking_level:
+            generation_config["thinkingConfig"] = {
+                "thinkingLevel": payload.thinking_level,
+            }
+    else:
+        generation_config["temperature"] = payload.temperature
+
     data = {
         "systemInstruction": {"parts": [{"text": payload.system_prompt}]},
         "contents": [{"role": "user", "parts": [{"text": payload.user_prompt}]}],
-        "generationConfig": {"temperature": payload.temperature, "maxOutputTokens": payload.max_tokens},
+        "generationConfig": generation_config,
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{payload.model}:generateContent?key={payload.api_key}"
-    body = _post_json(url, data, {"Content-Type": "application/json"})
-    try:
-        return str(body["candidates"][0]["content"]["parts"][0]["text"])
-    except (KeyError, IndexError, TypeError) as exc:
-        raise LlmProviderError("Gemini returned an unexpected response") from exc
+    body = _post_json(
+        url,
+        data,
+        {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "JobPilot/1.0",
+        },
+    )
+    text = _gemini_response_text(body)
+    if text:
+        return text
+    raise LlmProviderError(_gemini_empty_response_message(body))
+
+
+def _gemini_response_text(body: dict[str, Any]) -> str:
+    candidates = body.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+    candidate = candidates[0]
+    if not isinstance(candidate, dict):
+        return ""
+    content = candidate.get("content")
+    if not isinstance(content, dict):
+        return ""
+    parts = content.get("parts")
+    if not isinstance(parts, list):
+        return ""
+    text_parts = [
+        part["text"]
+        for part in parts
+        if isinstance(part, dict)
+        and isinstance(part.get("text"), str)
+        and not part.get("thought", False)
+    ]
+    return "".join(text_parts).strip()
+
+
+def _gemini_empty_response_message(body: dict[str, Any]) -> str:
+    details: list[str] = []
+    candidates = body.get("candidates")
+    if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict):
+        candidate = candidates[0]
+        finish_reason = candidate.get("finishReason")
+        finish_message = candidate.get("finishMessage")
+        if finish_reason:
+            details.append(f"finish_reason={finish_reason}")
+        if finish_message:
+            details.append(f"finish_message={str(finish_message)[:240]}")
+
+    prompt_feedback = body.get("promptFeedback")
+    if isinstance(prompt_feedback, dict):
+        block_reason = prompt_feedback.get("blockReason")
+        block_message = prompt_feedback.get("blockReasonMessage")
+        if block_reason:
+            details.append(f"prompt_block_reason={block_reason}")
+        if block_message:
+            details.append(f"prompt_block_message={str(block_message)[:240]}")
+
+    usage = body.get("usageMetadata")
+    if isinstance(usage, dict):
+        thought_tokens = usage.get("thoughtsTokenCount")
+        output_tokens = usage.get("candidatesTokenCount")
+        if thought_tokens is not None:
+            details.append(f"thought_tokens={thought_tokens}")
+        if output_tokens is not None:
+            details.append(f"output_tokens={output_tokens}")
+
+    suffix = f" ({'; '.join(details)})" if details else ""
+    return f"Gemini returned no text{suffix}"
 
 
 def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:

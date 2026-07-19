@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.ai.llm_client import LlmCompletionRequest, LlmProviderError, complete_text
+from app.ai.llm_client import LlmCompletionRequest, LlmProviderError, complete_text, test_llm_key
 from app.database.session import Base
 from app.models.user import User
 from app.repositories.llm_key_repository import create_llm_key, decrypt_llm_key, update_llm_key
@@ -73,3 +73,77 @@ class LlmKeyRepositoryTests(TestCase):
                     user_prompt="test",
                 )
             )
+
+    @patch("app.ai.llm_client._post_json")
+    def test_gemini_3_uses_minimal_thinking_without_temperature(self, post_json) -> None:
+        post_json.return_value = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"thought": True, "text": "internal reasoning"},
+                            {"text": "ok"},
+                        ]
+                    },
+                    "finishReason": "STOP",
+                }
+            ]
+        }
+
+        result = complete_text(
+            LlmCompletionRequest(
+                provider=LlmProvider.GEMINI,
+                api_key="gemini-test-key",
+                model="gemini-3.5-flash",
+                system_prompt="health check",
+                user_prompt="reply ok",
+                max_tokens=256,
+                temperature=0,
+                thinking_level="minimal",
+            )
+        )
+
+        self.assertEqual("ok", result)
+        request_data = post_json.call_args.args[1]
+        generation_config = request_data["generationConfig"]
+        self.assertEqual(256, generation_config["maxOutputTokens"])
+        self.assertEqual({"thinkingLevel": "minimal"}, generation_config["thinkingConfig"])
+        self.assertNotIn("temperature", generation_config)
+
+    @patch("app.ai.llm_client._post_json")
+    def test_gemini_empty_response_reports_finish_reason(self, post_json) -> None:
+        post_json.return_value = {
+            "candidates": [{"finishReason": "MAX_TOKENS"}],
+            "usageMetadata": {
+                "thoughtsTokenCount": 8,
+                "candidatesTokenCount": 0,
+            },
+        }
+
+        with self.assertRaisesRegex(
+            LlmProviderError,
+            "finish_reason=MAX_TOKENS.*thought_tokens=8",
+        ):
+            complete_text(
+                LlmCompletionRequest(
+                    provider=LlmProvider.GEMINI,
+                    api_key="gemini-test-key",
+                    model="gemini-3.5-flash",
+                    system_prompt="health check",
+                    user_prompt="reply ok",
+                    max_tokens=8,
+                )
+            )
+
+    @patch("app.ai.llm_client.complete_text", return_value="ok")
+    def test_gemini_health_check_reserves_room_for_thinking(self, complete) -> None:
+        result = test_llm_key(
+            provider=LlmProvider.GEMINI,
+            api_key="gemini-test-key",
+            model="gemini-3.5-flash",
+        )
+
+        self.assertEqual("ok", result)
+        request = complete.call_args.args[0]
+        self.assertEqual(256, request.max_tokens)
+        self.assertEqual("minimal", request.thinking_level)
