@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     linkedin_enrichment_batch_size: int = 25
     llm_key_encryption_secret: str | None = None
     llm_request_timeout_seconds: int = 30
+    resume_storage_provider: str = "database"
+    resume_storage_path: str = str(BACKEND_DIR / "resume_artifacts")
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

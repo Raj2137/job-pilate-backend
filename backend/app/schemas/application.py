@@ -29,6 +29,11 @@ class ApplicationProfileRead(ApplicationProfileUpdate):
 
 class ApplicationPrepareRequest(BaseModel):
     job_id: int
+    tailored_resume_id: int | None = Field(
+        default=None,
+        gt=0,
+        description="Optional saved tailored resume for this job.",
+    )
     overrides: dict[str, str | bool | int | float | None] = Field(default_factory=dict)
 
 

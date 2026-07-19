@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session
 from app.database.session import Base
 from app.models.job import Job
 from app.models.user import User
+from app.repositories.tailored_resume_repository import create_tailored_resume
 from app.schemas.application import ApplicationPrepareRequest, ApplicationProfileUpdate, ApplicationStatusUpdate
+from app.schemas.resume import TailoredResumeResponse
 from app.services.application_service import change_application_status, prepare_application, save_profile
 
 
@@ -89,3 +91,54 @@ class ApplicationServiceTests(TestCase):
         self.assertEqual("draft", application.status)
         self.assertIn("phone", application.missing_fields)
         self.assertIn("resume_url", application.missing_fields)
+
+    def test_prepares_application_with_saved_tailored_resume(self) -> None:
+        save_profile(
+            self.db,
+            self.user,
+            ApplicationProfileUpdate(
+                phone="+91-9999999999",
+                current_location="Bengaluru, India",
+            ),
+        )
+        generated = TailoredResumeResponse(
+            job_id=self.job.id,
+            job_title=self.job.title,
+            company=self.job.company,
+            source_resume_id=None,
+            tailored_resume_markdown="# Raj Kumar\n## Experience\n- Built Python APIs.",
+            headline="Backend Engineer",
+            professional_summary="Backend engineer building Python APIs.",
+            core_skills=["Python"],
+            keywords_incorporated=["Python"],
+            unsupported_job_requirements=[],
+            change_summary=[],
+            truthfulness_warnings=[],
+            estimated_alignment_score=80,
+            provider="openai",
+            model="gpt-test",
+        )
+        resume = create_tailored_resume(
+            self.db,
+            user_id=self.user.id,
+            generated=generated,
+            filename="example-backend-v1.docx",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            file_data=b"docx",
+            storage_provider="database",
+            storage_key="users/1/resumes/example-backend-v1.docx",
+        )
+
+        application = prepare_application(
+            self.db,
+            self.user,
+            ApplicationPrepareRequest(job_id=self.job.id, tailored_resume_id=resume.id),
+        )
+
+        self.assertEqual("ready_for_review", application.status)
+        self.assertEqual(resume.id, application.field_values["tailored_resume_id"])
+        self.assertEqual(resume.filename, application.field_values["resume_filename"])
+        self.assertEqual(
+            f"/api/resumes/tailored/{resume.id}/download",
+            application.field_values["resume_url"],
+        )

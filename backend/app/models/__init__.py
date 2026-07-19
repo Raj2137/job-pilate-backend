@@ -6,6 +6,7 @@ from app.models.llm_key import UserLlmKey
 from app.models.resume import UserResume
 from app.models.company import Company
 from app.models.search_segment import CollectionRun, SearchSegment
+from app.models.tailored_resume import TailoredResume
 from app.models.user import User
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "Job",
     "JobApplication",
     "SearchSegment",
+    "TailoredResume",
     "User",
     "UserLlmKey",
     "UserResume",

@@ -1,0 +1,35 @@
+CREATE TABLE IF NOT EXISTS tailored_resumes (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    source_resume_id INTEGER REFERENCES user_resumes(id) ON DELETE SET NULL,
+    version INTEGER NOT NULL,
+    job_title VARCHAR(255) NOT NULL,
+    company VARCHAR(255) NOT NULL,
+    tailored_resume_markdown TEXT NOT NULL,
+    headline VARCHAR(255) NOT NULL,
+    professional_summary TEXT NOT NULL,
+    core_skills JSON NOT NULL DEFAULT '[]',
+    keywords_incorporated JSON NOT NULL DEFAULT '[]',
+    unsupported_job_requirements JSON NOT NULL DEFAULT '[]',
+    change_summary JSON NOT NULL DEFAULT '[]',
+    truthfulness_warnings JSON NOT NULL DEFAULT '[]',
+    estimated_alignment_score DOUBLE PRECISION NOT NULL,
+    llm_provider VARCHAR(50) NOT NULL,
+    llm_model VARCHAR(255) NOT NULL,
+    requested_render_mode VARCHAR(32) NOT NULL DEFAULT 'auto',
+    actual_render_mode VARCHAR(32) NOT NULL DEFAULT 'ats',
+    template_fidelity VARCHAR(32) NOT NULL DEFAULT 'standardized',
+    filename VARCHAR(255) NOT NULL,
+    content_type VARCHAR(100) NOT NULL,
+    file_size INTEGER NOT NULL,
+    storage_provider VARCHAR(50) NOT NULL DEFAULT 'database',
+    storage_key VARCHAR(500) NOT NULL,
+    file_data BYTEA,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_tailored_resumes_user_job_version UNIQUE (user_id, job_id, version)
+);
+
+CREATE INDEX IF NOT EXISTS ix_tailored_resumes_user_id ON tailored_resumes (user_id);
+CREATE INDEX IF NOT EXISTS ix_tailored_resumes_job_id ON tailored_resumes (job_id);
