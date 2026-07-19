@@ -76,7 +76,7 @@ def _complete_openai_compatible(payload: LlmCompletionRequest) -> str:
         "temperature": payload.temperature,
         "max_tokens": payload.max_tokens,
     }
-    headers = {"Authorization": f"Bearer {payload.api_key}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {payload.api_key}", "Content-Type": "application/json", "Accept": "application/json",  "User-Agent": "JobPilot/1.0",}
     if payload.provider == LlmProvider.OPENROUTER:
         headers.update({"HTTP-Referer": "https://jobpilot.local", "X-Title": "JobPilot"})
     body = _post_json(f"{base_url}/chat/completions", data, headers)
