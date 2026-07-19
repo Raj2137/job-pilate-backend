@@ -111,6 +111,33 @@ class LlmKeyRepositoryTests(TestCase):
         self.assertNotIn("temperature", generation_config)
 
     @patch("app.ai.llm_client._post_json")
+    def test_gemini_can_request_schema_constrained_json(self, post_json) -> None:
+        post_json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"status":"ok"}'}]}}],
+        }
+        schema = {
+            "type": "object",
+            "properties": {"status": {"type": "string"}},
+            "required": ["status"],
+        }
+
+        result = complete_text(
+            LlmCompletionRequest(
+                provider=LlmProvider.GEMINI,
+                api_key="gemini-test-key",
+                model="gemini-3.5-flash",
+                system_prompt="Return status.",
+                user_prompt="Check.",
+                response_json_schema=schema,
+            )
+        )
+
+        self.assertEqual('{"status":"ok"}', result)
+        generation_config = post_json.call_args.args[1]["generationConfig"]
+        self.assertEqual("application/json", generation_config["responseMimeType"])
+        self.assertEqual(schema, generation_config["responseJsonSchema"])
+
+    @patch("app.ai.llm_client._post_json")
     def test_gemini_empty_response_reports_finish_reason(self, post_json) -> None:
         post_json.return_value = {
             "candidates": [{"finishReason": "MAX_TOKENS"}],
