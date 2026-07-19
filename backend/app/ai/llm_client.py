@@ -27,6 +27,7 @@ class LlmCompletionRequest:
     temperature: float = 0.2
     thinking_level: str | None = None
     response_json_schema: dict[str, Any] | None = None
+    request_timeout_seconds: int | None = None
 
 
 def complete_text(payload: LlmCompletionRequest) -> str:
@@ -87,7 +88,12 @@ def _complete_openai_compatible(payload: LlmCompletionRequest) -> str:
     }
     if payload.provider == LlmProvider.OPENROUTER:
         headers.update({"HTTP-Referer": "https://jobpilot.local", "X-Title": "JobPilot"})
-    body = _post_json(f"{base_url}/chat/completions", data, headers)
+    body = _post_json(
+        f"{base_url}/chat/completions",
+        data,
+        headers,
+        timeout_seconds=payload.request_timeout_seconds,
+    )
     try:
         return str(body["choices"][0]["message"]["content"])
     except (KeyError, IndexError, TypeError) as exc:
@@ -110,6 +116,7 @@ def _complete_anthropic(payload: LlmCompletionRequest) -> str:
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         },
+        timeout_seconds=payload.request_timeout_seconds,
     )
     try:
         return str(body["content"][0]["text"])
@@ -144,6 +151,7 @@ def _complete_gemini(payload: LlmCompletionRequest) -> str:
             "Accept": "application/json",
             "User-Agent": "JobPilot/1.0",
         },
+        timeout_seconds=payload.request_timeout_seconds,
     )
     text = _gemini_response_text(body)
     if text:
@@ -208,10 +216,17 @@ def _gemini_empty_response_message(body: dict[str, Any]) -> str:
     return f"Gemini returned no text{suffix}"
 
 
-def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str]) -> dict[str, Any]:
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    *,
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
     request = Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+    effective_timeout = timeout_seconds or get_settings().llm_request_timeout_seconds
     try:
-        with urlopen(request, timeout=get_settings().llm_request_timeout_seconds) as response:
+        with urlopen(request, timeout=effective_timeout) as response:
             charset = response.headers.get_content_charset() or "utf-8"
             return json.loads(response.read().decode(charset))
     except HTTPError as exc:

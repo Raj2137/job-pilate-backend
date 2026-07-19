@@ -26,7 +26,9 @@ class Settings(BaseSettings):
     scheduler_lease_minutes: int = 15
     linkedin_enrichment_batch_size: int = 25
     llm_key_encryption_secret: str | None = None
-    llm_request_timeout_seconds: int = 30
+    # Resume tailoring performs long structured generations; 30 seconds is too
+    # short for free/shared-capacity inference providers such as Gemini.
+    llm_request_timeout_seconds: int = 120
     resume_storage_provider: str = "database"
     resume_storage_path: str = str(BACKEND_DIR / "resume_artifacts")
 

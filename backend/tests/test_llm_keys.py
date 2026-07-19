@@ -129,6 +129,7 @@ class LlmKeyRepositoryTests(TestCase):
                 system_prompt="Return status.",
                 user_prompt="Check.",
                 response_json_schema=schema,
+                request_timeout_seconds=45,
             )
         )
 
@@ -136,6 +137,7 @@ class LlmKeyRepositoryTests(TestCase):
         generation_config = post_json.call_args.args[1]["generationConfig"]
         self.assertEqual("application/json", generation_config["responseMimeType"])
         self.assertEqual(schema, generation_config["responseJsonSchema"])
+        self.assertEqual(45, post_json.call_args.kwargs["timeout_seconds"])
 
     @patch("app.ai.llm_client._post_json")
     def test_gemini_empty_response_reports_finish_reason(self, post_json) -> None:
