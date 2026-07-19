@@ -108,6 +108,7 @@ def list_match_candidates(
     *,
     query_terms: list[str],
     job_title: str | None,
+    companies: list[str],
     preferred_locations: list[str],
     remote: bool | None,
     source: str | None,
@@ -143,6 +144,11 @@ def list_match_candidates(
     if preferred_locations:
         location_clauses = [Job.location.ilike(f"%{location.strip()}%") for location in preferred_locations]
         stmt = stmt.filter(or_(*location_clauses))
+
+    if companies:
+        company_clauses = [Job.company.ilike(f"%{company.strip()}%") for company in companies if company.strip()]
+        if company_clauses:
+            stmt = stmt.filter(or_(*company_clauses))
 
     if remote is not None:
         stmt = stmt.filter(Job.remote == remote)
