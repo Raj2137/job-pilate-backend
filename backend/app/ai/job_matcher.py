@@ -581,6 +581,7 @@ def _maybe_llm_evaluate(
                 user_prompt=_llm_user_prompt(payload, top),
                 max_tokens=min(6000, 1200 + len(top) * 400),
                 temperature=0.1,
+                request_timeout_seconds=300,
             )
         )
         evaluated, candidate_keywords = _apply_llm_evaluation(scored, text)

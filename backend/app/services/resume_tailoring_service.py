@@ -89,6 +89,7 @@ def tailor_resume_for_job(
                 max_tokens=3500,
                 temperature=0.1,
                 response_json_schema=_alignment_json_schema(),
+                request_timeout_seconds=120,
             )
         )
         alignment_context = _parse_with_json_repair(
@@ -123,6 +124,7 @@ def tailor_resume_for_job(
                 max_tokens=6000,
                 temperature=0.15,
                 response_json_schema=_tailored_resume_json_schema(),
+                request_timeout_seconds=120,
             )
         )
         result = _parse_with_json_repair(
@@ -401,6 +403,7 @@ def _parse_with_json_repair(
                 temperature=0,
                 thinking_level="minimal" if provider == LlmProvider.GEMINI else None,
                 response_json_schema=schema,
+                request_timeout_seconds=120,
             )
         )
         return parser(repaired)

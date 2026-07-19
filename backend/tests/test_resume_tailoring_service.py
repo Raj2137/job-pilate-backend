@@ -124,6 +124,8 @@ class ResumeTailoringServiceTests(TestCase):
         self.assertIn("never invent", analysis_request.system_prompt)
         self.assertIn(self.job.description, analysis_request.user_prompt)
         self.assertIn("verified_alignment_context", writer_request.user_prompt)
+        self.assertEqual(120, analysis_request.request_timeout_seconds)
+        self.assertEqual(120, writer_request.request_timeout_seconds)
 
     @patch("app.services.resume_tailoring_service.complete_text")
     def test_rejects_invalid_ai_resume_output(self, complete_text) -> None:
@@ -189,6 +191,7 @@ class ResumeTailoringServiceTests(TestCase):
         self.assertIn("Correct JSON syntax only", repair_request.system_prompt)
         self.assertEqual("minimal", repair_request.thinking_level)
         self.assertIsNotNone(repair_request.response_json_schema)
+        self.assertEqual(120, repair_request.request_timeout_seconds)
 
     @patch("app.services.resume_tailoring_service.complete_text")
     def test_accepts_frontend_resume_and_automatically_selects_active_key(self, complete_text) -> None:

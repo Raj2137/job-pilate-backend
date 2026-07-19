@@ -314,6 +314,8 @@ class JobFiltersAndMatchTests(TestCase):
         self.assertEqual(["Product design", "Workflow design"], response.items[0].matched_keywords)
         self.assertEqual(["Figma"], response.items[0].missing_keywords)
         self.assertEqual(["Product design", "Workflow design"], response.items[0].required_keywords)
+        request = complete_text.call_args.args[0]
+        self.assertEqual(300, request.request_timeout_seconds)
 
     @patch("app.ai.job_matcher.complete_text")
     def test_ai_match_falls_back_when_structured_output_is_invalid(self, complete_text) -> None:
