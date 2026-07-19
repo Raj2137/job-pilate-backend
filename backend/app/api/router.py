@@ -1,0 +1,18 @@
+"""API router registration."""
+
+from fastapi import APIRouter
+
+from app.applications.routes import router as applications_router
+from app.auth.routes import router as auth_router
+from app.companies.routes import router as companies_router
+from app.jobs.routes import router as jobs_router
+from app.resumes.routes import router as resumes_router
+from app.users.routes import router as users_router
+
+api_router = APIRouter()
+api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
+api_router.include_router(users_router, prefix="/users", tags=["users"])
+api_router.include_router(companies_router, prefix="/companies", tags=["companies"])
+api_router.include_router(jobs_router, prefix="/jobs", tags=["jobs"])
+api_router.include_router(resumes_router, prefix="/resumes", tags=["resumes"])
+api_router.include_router(applications_router, prefix="/applications", tags=["applications"])
