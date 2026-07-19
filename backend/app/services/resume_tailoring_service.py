@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
@@ -87,9 +88,19 @@ def tailor_resume_for_job(
                 ),
                 max_tokens=3500,
                 temperature=0.1,
+                response_json_schema=_alignment_json_schema(),
             )
         )
-        alignment_context = _parse_alignment_context(analysis_raw)
+        alignment_context = _parse_with_json_repair(
+            text=analysis_raw,
+            parser=_parse_alignment_context,
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            schema=_alignment_json_schema(),
+            stage="resume alignment analysis",
+            max_tokens=3500,
+        )
         resume_raw = complete_text(
             LlmCompletionRequest(
                 provider=provider,
@@ -111,9 +122,19 @@ def tailor_resume_for_job(
                 ),
                 max_tokens=6000,
                 temperature=0.15,
+                response_json_schema=_tailored_resume_json_schema(),
             )
         )
-        result = _parse_tailored_resume(resume_raw)
+        result = _parse_with_json_repair(
+            text=resume_raw,
+            parser=_parse_tailored_resume,
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            schema=_tailored_resume_json_schema(),
+            stage="tailored resume",
+            max_tokens=6000,
+        )
     except LlmProviderError as exc:
         raise ResumeTailoringProviderError(f"AI provider failed: {exc}") from exc
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
@@ -263,6 +284,126 @@ def _writer_user_prompt(
         },
         ensure_ascii=True,
     )
+
+
+def _alignment_json_schema() -> dict:
+    string_array = {"type": "array", "items": {"type": "string"}}
+    return {
+        "type": "object",
+        "properties": {
+            "candidate_positioning": {"type": "string"},
+            "candidate_keywords": string_array,
+            "candidate_evidence": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "claim": {"type": "string"},
+                        "source_evidence": {"type": "string"},
+                    },
+                    "required": ["claim", "source_evidence"],
+                    "additionalProperties": False,
+                },
+            },
+            "required_job_keywords": string_array,
+            "preferred_job_keywords": string_array,
+            "matched_keywords": string_array,
+            "missing_keywords": string_array,
+            "transferable_strengths": string_array,
+            "seniority_alignment": {"type": "string"},
+            "resume_strategy": string_array,
+            "truthfulness_risks": string_array,
+        },
+        "required": [
+            "candidate_positioning",
+            "candidate_keywords",
+            "candidate_evidence",
+            "required_job_keywords",
+            "preferred_job_keywords",
+            "matched_keywords",
+            "missing_keywords",
+            "transferable_strengths",
+            "seniority_alignment",
+            "resume_strategy",
+            "truthfulness_risks",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _tailored_resume_json_schema() -> dict:
+    string_array = {"type": "array", "items": {"type": "string"}}
+    return {
+        "type": "object",
+        "properties": {
+            "tailored_resume_markdown": {"type": "string"},
+            "headline": {"type": "string"},
+            "professional_summary": {"type": "string"},
+            "core_skills": string_array,
+            "keywords_incorporated": string_array,
+            "unsupported_job_requirements": string_array,
+            "change_summary": string_array,
+            "truthfulness_warnings": string_array,
+            "estimated_alignment_score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100,
+            },
+        },
+        "required": [
+            "tailored_resume_markdown",
+            "headline",
+            "professional_summary",
+            "core_skills",
+            "keywords_incorporated",
+            "unsupported_job_requirements",
+            "change_summary",
+            "truthfulness_warnings",
+            "estimated_alignment_score",
+        ],
+        "additionalProperties": False,
+    }
+
+
+def _parse_with_json_repair(
+    *,
+    text: str,
+    parser: Callable[[str], dict],
+    provider: LlmProvider,
+    api_key: str,
+    model: str,
+    schema: dict,
+    stage: str,
+    max_tokens: int,
+) -> dict:
+    try:
+        return parser(text)
+    except json.JSONDecodeError:
+        repaired = complete_text(
+            LlmCompletionRequest(
+                provider=provider,
+                api_key=api_key,
+                model=model,
+                system_prompt=(
+                    "You repair malformed JSON. Correct JSON syntax only, preserve the supplied content exactly, "
+                    "and return only one valid JSON object matching the supplied schema. Do not add, remove, "
+                    "rewrite, summarize, or infer any resume claim."
+                ),
+                user_prompt=json.dumps(
+                    {
+                        "stage": stage,
+                        "json_schema": schema,
+                        "malformed_json": text[:30000],
+                    },
+                    ensure_ascii=True,
+                ),
+                max_tokens=max_tokens,
+                temperature=0,
+                thinking_level="minimal" if provider == LlmProvider.GEMINI else None,
+                response_json_schema=schema,
+            )
+        )
+        return parser(repaired)
 
 
 def _parse_alignment_context(text: str) -> dict:

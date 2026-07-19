@@ -26,6 +26,7 @@ class LlmCompletionRequest:
     max_tokens: int = 1200
     temperature: float = 0.2
     thinking_level: str | None = None
+    response_json_schema: dict[str, Any] | None = None
 
 
 def complete_text(payload: LlmCompletionRequest) -> str:
@@ -118,6 +119,9 @@ def _complete_anthropic(payload: LlmCompletionRequest) -> str:
 
 def _complete_gemini(payload: LlmCompletionRequest) -> str:
     generation_config: dict[str, Any] = {"maxOutputTokens": payload.max_tokens}
+    if payload.response_json_schema:
+        generation_config["responseMimeType"] = "application/json"
+        generation_config["responseJsonSchema"] = payload.response_json_schema
     if payload.model.casefold().startswith("gemini-3"):
         if payload.thinking_level:
             generation_config["thinkingConfig"] = {

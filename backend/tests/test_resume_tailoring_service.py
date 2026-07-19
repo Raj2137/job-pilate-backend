@@ -137,6 +137,60 @@ class ResumeTailoringServiceTests(TestCase):
             )
 
     @patch("app.services.resume_tailoring_service.complete_text")
+    def test_repairs_malformed_writer_json_once(self, complete_text) -> None:
+        gemini_key = create_llm_key(
+            self.db,
+            self.user,
+            LlmKeyCreate(
+                provider=LlmProvider.GEMINI,
+                api_key="gemini-test-key-123456",
+                default_model="gemini-3.5-flash",
+            ),
+        )
+        analysis = {
+            "candidate_positioning": "Backend engineer focused on Python services.",
+            "candidate_keywords": ["Python"],
+            "candidate_evidence": [{"claim": "Python services", "source_evidence": "Built Python services."}],
+            "required_job_keywords": ["Python"],
+            "preferred_job_keywords": [],
+            "matched_keywords": ["Python"],
+            "missing_keywords": [],
+            "transferable_strengths": [],
+            "seniority_alignment": "Aligned.",
+            "resume_strategy": ["Prioritize Python work."],
+            "truthfulness_risks": [],
+        }
+        repaired = {
+            "tailored_resume_markdown": "# Raj Kumar\n\nBackend Engineer with Python experience.",
+            "headline": "Backend Engineer",
+            "professional_summary": "Backend engineer with Python experience.",
+            "core_skills": ["Python"],
+            "keywords_incorporated": ["Python"],
+            "unsupported_job_requirements": [],
+            "change_summary": ["Prioritized Python experience."],
+            "truthfulness_warnings": [],
+            "estimated_alignment_score": 70,
+        }
+        complete_text.side_effect = [
+            json.dumps(analysis),
+            '{"tailored_resume_markdown":"# Raj" "headline":"Backend Engineer"}',
+            json.dumps(repaired),
+        ]
+
+        result = tailor_resume_for_job(
+            self.db,
+            user=self.user,
+            payload=TailoredResumeRequest(job_id=self.job.id, llm_key_id=gemini_key.id),
+        )
+
+        self.assertEqual(70, result.estimated_alignment_score)
+        self.assertEqual(3, complete_text.call_count)
+        repair_request = complete_text.call_args_list[2].args[0]
+        self.assertIn("Correct JSON syntax only", repair_request.system_prompt)
+        self.assertEqual("minimal", repair_request.thinking_level)
+        self.assertIsNotNone(repair_request.response_json_schema)
+
+    @patch("app.services.resume_tailoring_service.complete_text")
     def test_accepts_frontend_resume_and_automatically_selects_active_key(self, complete_text) -> None:
         analysis = {
             "candidate_positioning": "Backend engineer focused on Python services.",
