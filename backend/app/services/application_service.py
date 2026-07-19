@@ -12,6 +12,7 @@ from app.repositories.application_repository import (
     update_application_status,
     upsert_application_profile,
 )
+from app.repositories.tailored_resume_repository import get_tailored_resume
 from app.schemas.application import ApplicationPrepareRequest, ApplicationProfileUpdate, ApplicationStatusUpdate
 
 
@@ -40,6 +41,18 @@ def prepare_application(db: Session, user: User, payload: ApplicationPrepareRequ
     if profile is None:
         raise ValueError("Application profile must be completed first")
 
+    tailored_resume = None
+    if payload.tailored_resume_id is not None:
+        tailored_resume = get_tailored_resume(
+            db,
+            user_id=user.id,
+            resume_id=payload.tailored_resume_id,
+        )
+        if tailored_resume is None:
+            raise LookupError("Tailored resume not found")
+        if tailored_resume.job_id != job.id:
+            raise ValueError("Tailored resume was generated for a different job")
+
     first_name, last_name = _split_name(user.full_name)
     fields = {
         "first_name": first_name,
@@ -57,6 +70,10 @@ def prepare_application(db: Session, user: User, payload: ApplicationPrepareRequ
         **(profile.default_answers or {}),
         **payload.overrides,
     }
+    if tailored_resume is not None:
+        fields["tailored_resume_id"] = tailored_resume.id
+        fields["resume_filename"] = tailored_resume.filename
+        fields["resume_url"] = f"/api/resumes/tailored/{tailored_resume.id}/download"
     fields = {key: value for key, value in fields.items() if value is not None and value != ""}
     required = ("first_name", "last_name", "email", "phone", "current_location", "resume_url")
     missing = [field for field in required if not fields.get(field)]

@@ -28,6 +28,16 @@ class LlmCompletionRequest:
 
 
 def complete_text(payload: LlmCompletionRequest) -> str:
+    if not payload.model.strip() or payload.model.strip().casefold() in {
+        "string",
+        "model",
+        "default",
+        "your-model",
+        "model-name",
+    }:
+        raise LlmProviderError(
+            "Invalid model configuration. Save a real provider model ID in the selected LLM key."
+        )
     if payload.provider in {LlmProvider.OPENAI, LlmProvider.GROQ, LlmProvider.OPENROUTER}:
         return _complete_openai_compatible(payload)
     if payload.provider == LlmProvider.ANTHROPIC:

@@ -24,13 +24,15 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def create_db_and_tables() -> None:
-    from app.models import application, company, job, llm_key, resume, search_segment, user  # noqa: F401
+    from app.models import application, company, job, llm_key, resume, search_segment, tailored_resume, user  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _add_missing_user_columns()
     _add_missing_job_columns()
     _add_missing_company_columns()
     _add_missing_search_segment_columns()
+    _add_missing_resume_columns()
+    _add_missing_tailored_resume_columns()
 
 
 def _add_missing_user_columns() -> None:
@@ -121,3 +123,38 @@ def _add_missing_search_segment_columns() -> None:
         for name, column_type in additions.items():
             if name not in existing:
                 connection.execute(text(f"ALTER TABLE search_segments ADD COLUMN {name} {column_type}"))
+
+
+def _add_missing_resume_columns() -> None:
+    inspector = inspect(engine)
+    if "user_resumes" not in inspector.get_table_names():
+        return
+    binary_type = "BLOB" if engine.dialect.name == "sqlite" else "BYTEA"
+    existing = {column["name"] for column in inspector.get_columns("user_resumes")}
+    additions = {
+        "original_file_size": "INTEGER",
+        "original_file_sha256": "VARCHAR(64)",
+        "original_storage_provider": "VARCHAR(50)",
+        "original_storage_key": "VARCHAR(500)",
+        "original_file_data": binary_type,
+    }
+    with engine.begin() as connection:
+        for name, column_type in additions.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE user_resumes ADD COLUMN {name} {column_type}"))
+
+
+def _add_missing_tailored_resume_columns() -> None:
+    inspector = inspect(engine)
+    if "tailored_resumes" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("tailored_resumes")}
+    additions = {
+        "requested_render_mode": "VARCHAR(32) NOT NULL DEFAULT 'auto'",
+        "actual_render_mode": "VARCHAR(32) NOT NULL DEFAULT 'ats'",
+        "template_fidelity": "VARCHAR(32) NOT NULL DEFAULT 'standardized'",
+    }
+    with engine.begin() as connection:
+        for name, column_type in additions.items():
+            if name not in existing:
+                connection.execute(text(f"ALTER TABLE tailored_resumes ADD COLUMN {name} {column_type}"))

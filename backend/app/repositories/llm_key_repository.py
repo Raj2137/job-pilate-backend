@@ -23,6 +23,15 @@ def get_llm_key(db: Session, user: User, key_id: int) -> UserLlmKey | None:
     return db.query(UserLlmKey).filter(UserLlmKey.user_id == user.id, UserLlmKey.id == key_id).first()
 
 
+def get_default_llm_key(db: Session, user: User) -> UserLlmKey | None:
+    return (
+        db.query(UserLlmKey)
+        .filter(UserLlmKey.user_id == user.id, UserLlmKey.is_active.is_(True))
+        .order_by(UserLlmKey.updated_at.desc(), UserLlmKey.id.desc())
+        .first()
+    )
+
+
 def create_llm_key(db: Session, user: User, payload: LlmKeyCreate) -> UserLlmKey:
     raw_key = payload.api_key.strip()
     provider = payload.provider.value

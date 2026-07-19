@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LlmProvider(StrEnum):
@@ -23,7 +23,19 @@ DEFAULT_MODEL_BY_PROVIDER = {
 }
 
 
-class LlmKeyCreate(BaseModel):
+class _LlmModelValidation(BaseModel):
+    @field_validator("default_model", check_fields=False)
+    @classmethod
+    def validate_default_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        model = value.strip()
+        if model.casefold() in {"string", "model", "default", "your-model", "model-name"}:
+            raise ValueError("default_model must be a real provider model ID or omitted")
+        return model or None
+
+
+class LlmKeyCreate(_LlmModelValidation):
     provider: LlmProvider
     api_key: str = Field(min_length=8)
     label: str | None = Field(default=None, max_length=100)
@@ -31,7 +43,7 @@ class LlmKeyCreate(BaseModel):
     is_active: bool = True
 
 
-class LlmKeyUpdate(BaseModel):
+class LlmKeyUpdate(_LlmModelValidation):
     api_key: str | None = Field(default=None, min_length=8)
     label: str | None = Field(default=None, max_length=100)
     default_model: str | None = Field(default=None, max_length=255)

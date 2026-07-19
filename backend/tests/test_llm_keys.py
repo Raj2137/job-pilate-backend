@@ -1,9 +1,11 @@
 from unittest import TestCase
 from unittest.mock import patch
 
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.ai.llm_client import LlmCompletionRequest, LlmProviderError, complete_text
 from app.database.session import Base
 from app.models.user import User
 from app.repositories.llm_key_repository import create_llm_key, decrypt_llm_key, update_llm_key
@@ -51,3 +53,23 @@ class LlmKeyRepositoryTests(TestCase):
         self.assertEqual("OpenAI Personal", updated.label)
         self.assertFalse(updated.is_active)
         self.assertEqual("sk_new_abcdefghij", decrypt_llm_key(updated))
+
+    def test_rejects_swagger_placeholder_as_model_name(self) -> None:
+        with self.assertRaises(ValidationError):
+            LlmKeyCreate(
+                provider=LlmProvider.OPENAI,
+                api_key="sk_test_1234567890",
+                default_model="string",
+            )
+
+    def test_provider_guard_rejects_placeholder_model_without_network_call(self) -> None:
+        with self.assertRaisesRegex(LlmProviderError, "Invalid model configuration"):
+            complete_text(
+                LlmCompletionRequest(
+                    provider=LlmProvider.OPENAI,
+                    api_key="sk_test_1234567890",
+                    model="string",
+                    system_prompt="test",
+                    user_prompt="test",
+                )
+            )

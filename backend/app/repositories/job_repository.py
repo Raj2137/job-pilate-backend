@@ -28,6 +28,10 @@ def upsert_job(db: Session, payload: JobCreate) -> Job:
     return job
 
 
+def get_job(db: Session, job_id: int) -> Job | None:
+    return db.query(Job).filter(Job.id == job_id).first()
+
+
 def get_jobs_by_external_ids(db: Session, *, source: str, external_ids: list[str]) -> dict[str, Job]:
     jobs: dict[str, Job] = {}
     for start in range(0, len(external_ids), 500):
