@@ -318,6 +318,7 @@ class ResumeJobMatchRequest(BaseModel):
     job_title: str | None = Field(default=None, description="Primary target job title or keywords")
     target_roles: list[str] = Field(default_factory=list)
     skills: list[str] = Field(default_factory=list)
+    companies: list[str] = Field(default_factory=list)
     preferred_locations: list[str] = Field(default_factory=list)
     years_experience: int | None = Field(default=None, ge=0, le=60)
     remote: bool | None = None
@@ -333,14 +334,28 @@ class ResumeJobMatchRequest(BaseModel):
     candidate_limit: int = Field(default=500, ge=20, le=2000)
     page: int = Field(default=1, ge=1)
     limit: int = Field(default=25, ge=1, le=100)
-    use_llm: bool = False
-    llm_key_id: int | None = None
-    llm_top_k: int = Field(default=10, ge=1, le=50)
+    use_llm: bool = Field(
+        default=False,
+        description="Use the selected BYOK model for semantic keyword extraction and complete job-fit evaluation.",
+    )
+    llm_key_id: int | None = Field(
+        default=None,
+        description="User-owned LLM key to use when use_llm is true.",
+    )
+    llm_top_k: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Number of deterministic candidates sent to AI for detailed evaluation.",
+    )
 
 
 class ResumeJobMatchItem(BaseModel):
     job: JobRead
     score: float
+    job_keywords: list[str] = Field(default_factory=list)
+    required_keywords: list[str] = Field(default_factory=list)
+    preferred_keywords: list[str] = Field(default_factory=list)
     matched_keywords: list[str]
     missing_keywords: list[str]
     experience_signal: str
@@ -363,4 +378,5 @@ class ResumeJobMatchResponse(BaseModel):
     filter_trace: list[str] = Field(default_factory=list)
     llm_used: bool = False
     llm_status: str | None = None
+    evaluation_method: str = "deterministic"
     items: list[ResumeJobMatchItem]

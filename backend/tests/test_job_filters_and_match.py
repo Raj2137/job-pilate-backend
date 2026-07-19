@@ -226,6 +226,21 @@ class JobFiltersAndMatchTests(TestCase):
         second_ids = {item.job.id for item in second_page.items}
         self.assertTrue(first_ids.isdisjoint(second_ids))
 
+    def test_resume_match_filters_by_company(self) -> None:
+        response = match_jobs_for_resume(
+            self.db,
+            ResumeJobMatchRequest(
+                resume_text="Software engineer with Python, APIs, JavaScript, and cloud experience.",
+                target_roles=["software engineer", "backend engineer"],
+                companies=["Stripe"],
+                candidate_limit=20,
+                limit=10,
+            ),
+        )
+
+        self.assertGreaterEqual(response.returned, 1)
+        self.assertTrue(all(item.job.company == "Stripe" for item in response.items))
+
     def test_resume_match_relaxes_filters_when_strict_preferences_find_nothing(self) -> None:
         response = match_jobs_for_resume(
             self.db,
@@ -257,7 +272,23 @@ class JobFiltersAndMatchTests(TestCase):
             self.user,
             LlmKeyCreate(provider=LlmProvider.GROQ, api_key="gsk_test_1234567890"),
         )
-        complete_text.return_value = '{"items":[{"job_id":2,"score":91,"reasons":["LLM sees strong product fit"],"red_flags":[]}]}'
+        complete_text.return_value = """
+        {
+          "candidate_keywords": ["Product design", "Workflow design", "Cross-functional collaboration"],
+          "items": [{
+            "job_id": 2,
+            "score": 91,
+            "job_keywords": ["Product design", "Workflow design", "Figma"],
+            "required_keywords": ["Product design", "Workflow design"],
+            "preferred_keywords": ["Figma"],
+            "matched_keywords": ["Product design", "Workflow design"],
+            "missing_keywords": ["Figma"],
+            "experience_signal": "Candidate experience aligns with the role level.",
+            "reasons": ["Strong product and workflow design evidence"],
+            "red_flags": []
+          }]
+        }
+        """
 
         response = match_jobs_for_resume(
             self.db,
@@ -275,6 +306,37 @@ class JobFiltersAndMatchTests(TestCase):
         )
 
         self.assertTrue(response.llm_used)
-        self.assertEqual("LLM rerank applied.", response.llm_status)
+        self.assertEqual("ai", response.evaluation_method)
+        self.assertEqual("AI evaluated 1 candidate jobs.", response.llm_status)
+        self.assertEqual("Product design", response.resume_keywords[0])
         self.assertEqual("Product Designer", response.items[0].job.title)
         self.assertEqual(91, response.items[0].score)
+        self.assertEqual(["Product design", "Workflow design"], response.items[0].matched_keywords)
+        self.assertEqual(["Figma"], response.items[0].missing_keywords)
+        self.assertEqual(["Product design", "Workflow design"], response.items[0].required_keywords)
+
+    @patch("app.ai.job_matcher.complete_text")
+    def test_ai_match_falls_back_when_structured_output_is_invalid(self, complete_text) -> None:
+        key = create_llm_key(
+            self.db,
+            self.user,
+            LlmKeyCreate(provider=LlmProvider.GROQ, api_key="gsk_test_1234567890"),
+        )
+        complete_text.return_value = '{"candidate_keywords":["Python"],"items":[]}'
+
+        response = match_jobs_for_resume(
+            self.db,
+            ResumeJobMatchRequest(
+                resume_text="Backend engineer with Python and FastAPI API development experience.",
+                target_roles=["backend engineer"],
+                use_llm=True,
+                llm_key_id=key.id,
+                limit=3,
+            ),
+            self.user,
+        )
+
+        self.assertFalse(response.llm_used)
+        self.assertEqual("deterministic", response.evaluation_method)
+        self.assertIn("AI fallback:", response.llm_status)
+        self.assertGreaterEqual(response.returned, 1)
